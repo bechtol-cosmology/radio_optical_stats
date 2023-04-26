@@ -115,19 +115,19 @@ def tapq_vizier(data, acol='RAJ2000', dcol='DEJ2000',
     if verbose==True:
         dt = time.time()-t0
         print('')
-        print('time for host finding (N='+str(len(data))+') = ' + str(np.round(dt, 2)) +'s')
+        print('time for query (N='+str(len(data))+') = ' + str(np.round(dt, 2)) +'s')
         print('')
     
     return outdata
 
 
-def find_photozs(data, namecol='AllWISE', acol='RAJ2000', dcol='DEJ2000',
+def find_photozs(data, namecol='ls_id', acol='ra', dcol='dec',
                  vizra='RAJ2000', vizdec='DEJ2000',
                  vizkey='VII/292/north',
                  zpcols=['zphot', 'e_zphot', 'fqual'],
                  sepcolname='ang_sep',
                  searchrad=1*u.arcsec,
-                 chunk_size=40000):
+                 chunk_size=10000):
     'query AllWISE using tap-vizier'
     ###query VizieR
     ###split into chunks if large input
@@ -167,6 +167,33 @@ def find_photozs(data, namecol='AllWISE', acol='RAJ2000', dcol='DEJ2000',
     bestmatch.sort(namecol)
 
     return bestmatch
+
+
+def split_ls_north_south(data, acol='ra', dcol='dec',
+                         posunits=('deg', 'deg')):
+    'split input data into LS North and South'
+    if data[acol].unit is None:
+        raunit = posunits[0]
+        data[acol].unit = raunit
+        print(f'{acol} column has no units, assuming {raunit}')
+    if data[dcol].unit is None:
+        deunit = posunits[1]
+        data[dcol].unit = deunit
+        print(f'{dcol} column has no units, assuming {deunit}')
+    
+    skypos = SkyCoord(ra=data[acol], dec=data[dcol])
+    galb = np.array(skypos.galactic.b.deg)
+    decl = np.array(skypos.dec.deg)
+    nfilt = (galb > 0) & (decl > 32.375)
+    dnorth = data[nfilt]
+    dsouth = data[~nfilt]
+    
+    splitdata = {'north': dnorth, 'south': dsouth}
+    
+    return splitdata
+
+
+
 
 
 def query_lsdr8_north_and_south(data, namecol='AllWISE', acol='RAJ2000',
@@ -621,7 +648,7 @@ def fetch_redshifts(data, acol='ra', dcol='dec', idcol='ls_id',
     if photo_zs==True:
         pzdata = query_lsdr8_north_and_south(targets, namecol=idcol,
                                              acol=acol, dcol=dcol,
-                                             searchrad=search_radius,
+                                             searchrad=searchrad,
                                              chunk_size=chunk_size)
         z_data['photo'] = pzdata
     
@@ -646,7 +673,7 @@ def add_col_descriptions(data, info_dict):
 
 def check_outdir(outdir, specfile='spec_zs.fits', photfile='photo_zs.fits'):
     'check if files already exist in outdir'
-    dlist = os.listdir(dfile)
+    dlist = os.listdir(outdir)
     
     does_not_exist = True
     
@@ -668,11 +695,11 @@ def parse_args():
                         help="table targets to find redshifts for")
     parser.add_argument("--namecol", action='store', type=str, default='ls_id',
                         help="name of id col in hosts")
-    parser.add_argument("--racol", action='store', type=str, default='RAJ2000',
+    parser.add_argument("--racol", action='store', type=str, default='ra',
                         help="name of RA col in hosts")
     parser.add_argument("--raunit", action='store', type=str, default='deg',
                         help="RA units")
-    parser.add_argument("--decol", action='store', type=str, default='DEJ2000',
+    parser.add_argument("--decol", action='store', type=str, default='dec',
                         help="name of Decl. col in hosts")
     parser.add_argument("--deunit", action='store', type=str, default='deg',
                         help="Decl. units")
@@ -706,7 +733,7 @@ def parse_args():
     args.get_spec = strtobool(args.get_spec)
     args.get_photo = strtobool(args.get_photo)
     
-    if args.spec_z == False:
+    if args.get_spec == False:
         args.spec_out = None
     if args.get_photo == False:
         args.photo_out = None
@@ -720,25 +747,45 @@ def parse_args():
 
 ####create small test set to run on
 
-if __name__ == '__main__':
-    args = parse_args()
-    if args.photo_out is not None or args.spec_out is not None:
-        data = Table.read(args.targets)
-        fname_check_good = check_outdir(outdir=args.outdir,
-                                        specfile=args.spec_out,
-                                        photfile=args.photo_out)
-        if fname_check == True:
-            fetch_redshifts(data, acol=args.racol, dcol=args.decol,
-                            idcol=args.namecol,
-                            posunits=(args.raunit, args.deunit),
-                            photo_zs=args.get_photo,
-                            spec_zs=args.get_spec,
-                    searchrad=args.search_radius,
-                    chunk_size=args.chunksize)
-            ####add in lines to create filenames (join outdir and names) and write to file
-        else:
-            print(f'{args.spec_out} OR {args.photo_out} already exists in {args.outdir}\nplease chose another filename')
-    else:
-        print('no redshifts searched for')
+
+data = Table.read('../data/lsdr9_test100k_positions.fits')
+splitdata = split_ls_north_south(data)
+
+#pz_north = 
+
+
+#if __name__ == '__main__':
+#    t_start = time.time()
+#    args = parse_args()
+#    if args.photo_out is not None or args.spec_out is not None:
+#        data = Table.read(args.targets)
+#        fname_check_good = check_outdir(outdir=args.outdir,
+#                                        specfile=args.spec_out,
+#                                        photfile=args.photo_out)
+#        if fname_check_good == True:
+#            print(f'Finding redshifts for {len(data)} objects')
+#            print('')
+#            z_data = fetch_redshifts(data, acol=args.racol, dcol=args.decol,
+#                                     idcol=args.namecol,
+#                                     posunits=(args.raunit, args.deunit),
+#                                     photo_zs=args.get_photo,
+#                                     spec_zs=args.get_spec,
+#                                     searchrad=args.search_radius,
+#                                     chunk_size=args.chunksize)
+#            t_elapsed = np.round(time.time()-t_start, 2)
+#            print(f'time for redshift finding = {t_elapsed}s')
+#            ####add in lines to create filenames (join outdir and names) and write to file
+#            if 'photo' in list(z_data.keys()):
+#                poutname = '/'.join([args.outdir, args.photo_out])
+#                z_data['photo'].write(poutname)
+#            if 'spec' in list(z_data.keys()):
+#                soutname = '/'.join([args.outdir, args.spec_out])
+#                z_data['spec'].write(soutname)
+#        else:
+#            print(f'{args.spec_out} OR {args.photo_out} already exists in {args.outdir}\nplease chose another filename')
+#    else:
+#        print('no redshifts searched for')
     
 
+###need to split input into managable sizes --- 500k too big, try 250k?
+###don't forget randoms
