@@ -128,7 +128,7 @@ def find_photozs(data, namecol='ls_id', acol='ra', dcol='dec',
                  sepcolname='ang_sep',
                  searchrad=1*u.arcsec,
                  chunk_size=10000):
-    'query AllWISE using tap-vizier'
+    'query LS-DR8 photo-zs (Duncan, 2022) using tap-vizier'
     ###query VizieR
     ###split into chunks if large input
     dlen = len(data)
@@ -751,7 +751,21 @@ def parse_args():
 data = Table.read('../data/lsdr9_test100k_positions.fits')
 splitdata = split_ls_north_south(data)
 
-#pz_north = 
+qn = write_query(table_to_query='VII/292/north',
+                 search_rad=1*u.arcsec,
+                 upload_name='uploaded_data',
+                 upra='ra', updec='dec',
+                 qra='RAJ2000', qdec='DEJ2000')
+tap = TapPlus(url='http://tapvizier.u-strasbg.fr/TAPVizieR/tap')
+job = tap.launch_job(query=qn, upload_resource=splitdata['north'][:9999],
+                     upload_table_name='uploaded_data',
+                     verbose=True)
+
+
+#pz_north = find_photozs(data=splitdata['north'],
+#                        namecol='ls_id', acol='ra', dcol='dec',
+#                        vizkey='VII/292/north',
+#                        chunk_size=30000)
 
 
 #if __name__ == '__main__':

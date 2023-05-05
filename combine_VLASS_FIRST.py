@@ -204,4 +204,6 @@ vfirst = join(vlass[vc2], unique(fxv[['Component_name', 'FIRST']], 'Component_na
 vfirst = join(vfirst, matched[['FIRST', 'n_matches', 'spidx', 'e_spidx']]) ###spidx of VLASS components
 fvlass = join(first, matched[['FIRST', 'n_matches', 'spidx', 'e_spidx']]) ###spidx of FIRST components
 fvlass.meta = {}
+vfirst.meta = {}
 
+#vfirst.write('../data/vlass-first_specidxs.fits')
