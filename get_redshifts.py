@@ -2,6 +2,7 @@
 ###refactor so spec_zs is a class with each survey a function
 
 import numpy as np, sys, warnings, argparse, os
+from pyvo.dal import TAPService
 from distutils.util import strtobool
 from astropy import units as u
 from astroquery.vizier import Vizier
@@ -64,7 +65,7 @@ def tapq_vizier(data, acol='RAJ2000', dcol='DEJ2000',
                 vizra='RAJ2000', vizdec='DEJ2000',
                 upload_name='uploaded_data',
                 sep_col='ang_sep', verbose=True,
-                qcols=None):
+                qcols=None, timeout=1200, assume_posunits=('deg', 'deg')):
     'function to upload a table and perform positional cross match against a Vizier table'
     ##defaults to allwise if no vizier table input'
     
@@ -79,13 +80,13 @@ def tapq_vizier(data, acol='RAJ2000', dcol='DEJ2000',
                         qra=vizra, qdec=vizdec)
     
     ##setup tap and launch job
-    tap = TapPlus(url='http://tapvizier.u-strasbg.fr/TAPVizieR/tap')
-    job = tap.launch_job_async(query=query, upload_resource=data,
-                               upload_table_name=upload_name,
-                               verbose=verbose)
+    tap = TAPService('http://tapvizier.u-strasbg.fr/TAPVizieR/tap')
+    updata = {upload_name: data}
+    if verbose == True:
+        print('launching async query to CDS TAPVizieR service')
+        print(query)
+    outdata = tap.run_async(query, uploads=updata, timeout=timeout).to_table()
     
-    ###get results
-    outdata = job.get_data()
     
     ###rename viz pos cols if the same as input cols
     if vizra==acol:
@@ -94,6 +95,15 @@ def tapq_vizier(data, acol='RAJ2000', dcol='DEJ2000',
         vizdec = '_'.join([vizdec, '2'])
     
     ###calculate angular separation
+    ###add in units if not present
+    if outdata[acol].unit is None:
+        outdata[acol].unit = assume_posunits[0]
+    if outdata[vizra].unit is None:
+        outdata[vizra].unit = assume_posunits[0]
+    if outdata[dcol].unit is None:
+        outdata[dcol].unit = assume_posunits[1]
+    if outdata[vizdec].unit is None:
+        outdata[vizdec].unit = assume_posunits[1]
     posin = SkyCoord(ra=outdata[acol], dec=outdata[dcol])
     posviz = SkyCoord(ra=outdata[vizra], dec=outdata[vizdec])
     angsep = posin.separation(posviz).to(search_radius.unit)
@@ -206,12 +216,14 @@ def query_lsdr8_north_and_south(data, namecol='AllWISE', acol='RAJ2000',
     ###select subset in NGC for north query, everything else for south query
     ##determine b and use np arrays for filtering to avoid quantity issues
     ## NGC: b > 0 & d > 32.375deg
-    skypos = SkyCoord(ra=data[acol], dec=data[dcol])
+    photdat = data[data[dcol]<35]
+    skypos = SkyCoord(ra=photdat[acol], dec=photdat[dcol])
     galb = np.array(skypos.galactic.b.deg)
     decl = np.array(skypos.dec.deg)
     nfilt = (galb > 0) & (decl > 32.375)
-    dnorth = data[nfilt]
-    dsouth = data[~nfilt]
+    ###won't find anything with Dec > 35, filter out
+    dnorth = photdat[nfilt]
+    dsouth = photdat[~nfilt]
     
     ###account for possibility of data only in one or other fields and allow to still output
     if len(dnorth)>0:
@@ -748,57 +760,57 @@ def parse_args():
 ####create small test set to run on
 
 
-data = Table.read('../data/lsdr9_test100k_positions.fits')
-splitdata = split_ls_north_south(data)
+#data = Table.read('../data/lsdr9_test100k_positions.fits')
+#splitdata = split_ls_north_south(data)
+#
+##qn = write_query(table_to_query='VII/292/north',
+##                 search_rad=1*u.arcsec,
+##                 upload_name='uploaded_data',
+##                 upra='ra', updec='dec',
+##                 qra='RAJ2000', qdec='DEJ2000')
+##tap = TapPlus(url='http://tapvizier.u-strasbg.fr/TAPVizieR/tap')
+##job = tap.launch_job(query=qn, upload_resource=splitdata['north'][:9999],
+##                     upload_table_name='uploaded_data',
+##                     verbose=True)
+#
+#
+##pz_north = find_photozs(data=splitdata['north'],
+##                        namecol='ls_id', acol='ra', dcol='dec',
+##                        vizkey='VII/292/north',
+##                        chunk_size=30000)
 
-qn = write_query(table_to_query='VII/292/north',
-                 search_rad=1*u.arcsec,
-                 upload_name='uploaded_data',
-                 upra='ra', updec='dec',
-                 qra='RAJ2000', qdec='DEJ2000')
-tap = TapPlus(url='http://tapvizier.u-strasbg.fr/TAPVizieR/tap')
-job = tap.launch_job(query=qn, upload_resource=splitdata['north'][:9999],
-                     upload_table_name='uploaded_data',
-                     verbose=True)
 
-
-#pz_north = find_photozs(data=splitdata['north'],
-#                        namecol='ls_id', acol='ra', dcol='dec',
-#                        vizkey='VII/292/north',
-#                        chunk_size=30000)
-
-
-#if __name__ == '__main__':
-#    t_start = time.time()
-#    args = parse_args()
-#    if args.photo_out is not None or args.spec_out is not None:
-#        data = Table.read(args.targets)
-#        fname_check_good = check_outdir(outdir=args.outdir,
-#                                        specfile=args.spec_out,
-#                                        photfile=args.photo_out)
-#        if fname_check_good == True:
-#            print(f'Finding redshifts for {len(data)} objects')
-#            print('')
-#            z_data = fetch_redshifts(data, acol=args.racol, dcol=args.decol,
-#                                     idcol=args.namecol,
-#                                     posunits=(args.raunit, args.deunit),
-#                                     photo_zs=args.get_photo,
-#                                     spec_zs=args.get_spec,
-#                                     searchrad=args.search_radius,
-#                                     chunk_size=args.chunksize)
-#            t_elapsed = np.round(time.time()-t_start, 2)
-#            print(f'time for redshift finding = {t_elapsed}s')
-#            ####add in lines to create filenames (join outdir and names) and write to file
-#            if 'photo' in list(z_data.keys()):
-#                poutname = '/'.join([args.outdir, args.photo_out])
-#                z_data['photo'].write(poutname)
-#            if 'spec' in list(z_data.keys()):
-#                soutname = '/'.join([args.outdir, args.spec_out])
-#                z_data['spec'].write(soutname)
-#        else:
-#            print(f'{args.spec_out} OR {args.photo_out} already exists in {args.outdir}\nplease chose another filename')
-#    else:
-#        print('no redshifts searched for')
+if __name__ == '__main__':
+    t_start = time.time()
+    args = parse_args()
+    if args.photo_out is not None or args.spec_out is not None:
+        data = Table.read(args.targets)
+        fname_check_good = check_outdir(outdir=args.outdir,
+                                        specfile=args.spec_out,
+                                        photfile=args.photo_out)
+        if fname_check_good == True:
+            print(f'Finding redshifts for {len(data)} objects')
+            print('')
+            z_data = fetch_redshifts(data, acol=args.racol, dcol=args.decol,
+                                     idcol=args.namecol,
+                                     posunits=(args.raunit, args.deunit),
+                                     photo_zs=args.get_photo,
+                                     spec_zs=args.get_spec,
+                                     searchrad=args.search_radius,
+                                     chunk_size=args.chunksize)
+            t_elapsed = np.round(time.time()-t_start, 2)
+            print(f'time for redshift finding = {t_elapsed}s')
+            ####add in lines to create filenames (join outdir and names) and write to file
+            if 'photo' in list(z_data.keys()):
+                poutname = '/'.join([args.outdir, args.photo_out])
+                z_data['photo'].write(poutname)
+            if 'spec' in list(z_data.keys()):
+                soutname = '/'.join([args.outdir, args.spec_out])
+                z_data['spec'].write(soutname)
+        else:
+            print(f'{args.spec_out} OR {args.photo_out} already exists in {args.outdir}\nplease chose another filename')
+    else:
+        print('no redshifts searched for')
     
 
 ###need to split input into managable sizes --- 500k too big, try 250k?
